@@ -3,21 +3,74 @@
 # pip install pyqt5 sounddevice numpy pydub
 # sudo apt install ffmpeg
 
+import os
 import sys
 import time
 import tempfile
 import numpy as np
 import sounddevice as sd
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from pydub import AudioSegment
+
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget,
-    QPushButton, QVBoxLayout, QLabel, QProgressBar,
-    QSystemTrayIcon, QMenu, QAction
+    QApplication, QMainWindow, QWidget, QFrame, 
+    QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
+    QSystemTrayIcon, QMenu, QAction, QSizePolicy, QSpacerItem
 )
 from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
-from pydub import AudioSegment
+import ai_voice_answers.about             as about
+import ai_voice_answers.modules.configure as configure 
+
+from ai_voice_answers.modules.resources import resource_path
+from ai_voice_answers.modules.wabout    import show_about_window
+from ai_voice_answers.desktop import create_desktop_file
+from ai_voice_answers.desktop import create_desktop_directory
+from ai_voice_answers.desktop import create_desktop_menu
+
+from ai_voice_answers.modules.consult    import transcription_in_depth
+from ai_voice_answers.modules.consult    import consultation_in_depth
+from ai_voice_answers.modules.work_audio import text_to_audio_file
+from ai_voice_answers.modules.work_audio import play_audio_file
+
+# ---------- Path to config file ----------
+CONFIG_PATH = os.path.join( os.path.expanduser("~"),
+                            ".config", 
+                            about.__package__, 
+                            "config.json" )
+
+DEFAULT_CONTENT={   
+    "toolbar_configure": "Configure",
+    "toolbar_configure_tooltip": "Open the configure Json file of program GUI",
+    "toolbar_about": "About",
+    "toolbar_about_tooltip": "About the program",
+    "toolbar_coffee": "Coffee",
+    "toolbar_coffee_tooltip": "Buy me a coffee (TrucomanX)",
+    "window_width": 1024,
+    "window_height": 800
+}
+
+configure.verify_default_config(CONFIG_PATH,default_content=DEFAULT_CONTENT)
+
+CONFIG=configure.load_config(CONFIG_PATH)
+
+# ---------- Path to config gpt file ----------
+CONFIG_GPT_PATH = os.path.join( os.path.expanduser("~"),
+                                ".config", 
+                                about.__package__, 
+                                "config.gpt.json" )
+
+DEFAULT_GPT_CONTENT={
+    "api_key": "",
+    "usage": "https://deepinfra.com/dash/usage",
+    "base_url": "https://api.deepinfra.com/v1/openai",
+    "model_llm": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+    "model_transcript": "mistralai/Voxtral-Mini-3B-2507"
+}
+
+configure.verify_default_config(CONFIG_GPT_PATH,default_content=DEFAULT_GPT_CONTENT)
+
 
 
 # =========================
@@ -77,12 +130,14 @@ class ProcessingThread(QThread):
         self.samplerate = samplerate
 
     def run(self):
-        for i in range(30):
-            time.sleep(0.03)
-            self.progress.emit(i)
+        # progress
+        self.progress.emit(0)
 
         audio_int16 = np.clip(self.audio_data, -1.0, 1.0)
         audio_int16 = (audio_int16 * 32767).astype(np.int16)
+        
+        # progress
+        self.progress.emit(10)
 
         audio_segment = AudioSegment(
             audio_int16.tobytes(),
@@ -95,14 +150,62 @@ class ProcessingThread(QThread):
         tmp.close()
 
         audio_segment.export(tmp.name, format="mp3")
+        
+        config_gpt = configure.load_config(CONFIG_GPT_PATH)
+        
+        if len(config_gpt["api_key"].strip()) == 0:
+            print("No api_key in:", CONFIG_GPT_PATH)
+            self.progress.emit(0)
+            return        
 
-        for i in range(30, 101):
-            time.sleep(0.01)
-            self.progress.emit(i)
-
+        # progress
+        self.progress.emit(30)
         print("💾 MP3 salvo em:", tmp.name)
-        self.finished.emit(tmp.name)
+        
+        language = "pt"
+        fator    = 1.5
+        
+        transcription = transcription_in_depth(config_gpt, tmp.name, language=language)
+        
+        # progress
+        self.progress.emit(60)
+        print("📝 transcription:", transcription)
+        
+        res = consultation_in_depth(config_gpt, transcription)
+        
+        # progress
+        self.progress.emit(90)
+        print("📝 result:", res)
+        
+        res_audio_path = text_to_audio_file(res,language)
+        
+        # progress
+        self.progress.emit(100)
+        
+        # play_audio_file(res_audio_path, fator)
+        
+        self.finished.emit(res_audio_path)
 
+# =========================
+# PLAY AUDIO THREAD
+# =========================
+class AudioPlayerThread(QThread):
+    finished = pyqtSignal()
+
+    def __init__(self, audio_path, fator=1.0, parent=None):
+        super().__init__(parent)
+        self.audio_path = audio_path
+        self.fator = fator
+        self._running = True
+
+    def run(self):
+        if self._running:
+            play_audio_file(self.audio_path, self.fator)
+        self.finished.emit()
+
+    def stop(self):
+        self._running = False
+        # se play_audio_file suportar stop → chamar aqui
 
 # =========================
 # MAIN WINDOW
@@ -127,33 +230,51 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         layout = QVBoxLayout()
-
-        self.status_label = QLabel("Pronto para gravar")
-        self.status_label.setAlignment(Qt.AlignCenter)
-
+        
         self.record_btn = QPushButton("▶️ Gravar")
         self.record_btn.clicked.connect(self.start_recording)
+        layout.addWidget(self.record_btn)
 
         self.stop_btn = QPushButton("⏹️ Finalizar gravação")
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_recording)
-
-        self.process_btn = QPushButton("Processar")
-        self.process_btn.setEnabled(False)
-        self.process_btn.clicked.connect(self.process_audio)
+        layout.addWidget(self.stop_btn)
+        
+        # Layout horizontal para descartar + play
+        buttons_layout = QHBoxLayout()
 
         self.discard_btn = QPushButton("Descartar")
         self.discard_btn.setEnabled(False)
         self.discard_btn.clicked.connect(self.discard_audio)
+        buttons_layout.addWidget(self.discard_btn)
+
+        self.play_btn = QPushButton("▶️ Play Audio")
+        self.play_btn.setEnabled(False)  # Pode habilitar quando tiver áudio
+        self.play_btn.clicked.connect(lambda: print("Play Audio clicado"))
+        buttons_layout.addWidget(self.play_btn)
+
+        # Adicionar layout horizontal ao layout principal
+        layout.addLayout(buttons_layout)
+        
+        # Criar espaçamento vertical de 20 pixels
+        layout.addSpacerItem(QSpacerItem(0, 20, QSizePolicy.Minimum, QSizePolicy.Fixed))
+
+        self.process_btn = QPushButton("Processar")
+        self.process_btn.setEnabled(False)
+        self.process_btn.clicked.connect(self.process_audio)
+        layout.addWidget(self.process_btn)
+        
+
+        self.status_label = QLabel("Pronto para gravar")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        # Tornar selecionável e copiável
+        self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # Impedir expansão vertical desnecessária
+        #self.status_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        layout.addWidget(self.status_label)
 
         self.progress = QProgressBar()
         self.progress.setVisible(False)
-
-        layout.addWidget(self.status_label)
-        layout.addWidget(self.record_btn)
-        layout.addWidget(self.stop_btn)
-        layout.addWidget(self.process_btn)
-        layout.addWidget(self.discard_btn)
         layout.addWidget(self.progress)
 
         central.setLayout(layout)
@@ -211,6 +332,12 @@ class MainWindow(QMainWindow):
         self.status_label.setText("MP3 salvo com sucesso")
         self.progress.setVisible(False)
         print("📁 Arquivo final:", path)
+        
+        self.player = AudioPlayerThread(path, fator=1.5)
+        self.player.finished.connect(
+            lambda: self.status_label.setText("Resposta reproduzida")
+        )
+        self.player.start()
 
     def closeEvent(self, event):
         event.ignore()
