@@ -13,7 +13,7 @@ import sounddevice as sd
 from pydub import AudioSegment
 
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QFrame, 
+    QApplication, QMainWindow, QWidget, QFrame, QTextEdit, 
     QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
     QSystemTrayIcon, QMenu, QAction, QSizePolicy, QSpacerItem
 )
@@ -121,8 +121,8 @@ class AudioRecorder:
 # PROCESSING THREAD
 # =========================
 class ProcessingThread(QThread):
-    progress = pyqtSignal(int)
-    finished = pyqtSignal(str)
+    progress = pyqtSignal(int, str)
+    finished = pyqtSignal(dict)
 
     def __init__(self, audio_data, samplerate, parent=None):
         super().__init__(parent)
@@ -131,13 +131,13 @@ class ProcessingThread(QThread):
 
     def run(self):
         # progress
-        self.progress.emit(0)
+        self.progress.emit(0,"")
 
         audio_int16 = np.clip(self.audio_data, -1.0, 1.0)
         audio_int16 = (audio_int16 * 32767).astype(np.int16)
         
         # progress
-        self.progress.emit(10)
+        self.progress.emit(10,"Audio loaded in memory")
 
         audio_segment = AudioSegment(
             audio_int16.tobytes(),
@@ -154,12 +154,11 @@ class ProcessingThread(QThread):
         config_gpt = configure.load_config(CONFIG_GPT_PATH)
         
         if len(config_gpt["api_key"].strip()) == 0:
-            print("No api_key in:", CONFIG_GPT_PATH)
-            self.progress.emit(0)
+            self.progress.emit(0,"No api_key in:"+CONFIG_GPT_PATH)
             return        
 
         # progress
-        self.progress.emit(30)
+        self.progress.emit(30,"💾 MP3 saved")
         print("💾 MP3 salvo em:", tmp.name)
         
         language = "pt"
@@ -168,23 +167,28 @@ class ProcessingThread(QThread):
         transcription = transcription_in_depth(config_gpt, tmp.name, language=language)
         
         # progress
-        self.progress.emit(60)
+        self.progress.emit(60,"transcription:\n"+transcription)
         print("📝 transcription:", transcription)
         
         res = consultation_in_depth(config_gpt, transcription)
         
         # progress
-        self.progress.emit(90)
+        self.progress.emit(90,"response obtained")
         print("📝 result:", res)
         
         res_audio_path = text_to_audio_file(res,language)
         
         # progress
-        self.progress.emit(100)
+        self.progress.emit(100,"")
         
         # play_audio_file(res_audio_path, fator)
-        
-        self.finished.emit(res_audio_path)
+        out = {
+            "transcription" : transcription,
+            "transcription_audio_path" : tmp.name,
+            "response": res,
+            "response_audio_path": res_audio_path
+        }
+        self.finished.emit(out)
 
 # =========================
 # PLAY AUDIO THREAD
@@ -219,6 +223,7 @@ class MainWindow(QMainWindow):
 
         self.recorder = AudioRecorder()
         self.audio_data = None
+        self.audio_path = None
 
         self._build_ui()
 
@@ -250,7 +255,7 @@ class MainWindow(QMainWindow):
 
         self.play_btn = QPushButton("▶️ Play Audio")
         self.play_btn.setEnabled(False)  # Pode habilitar quando tiver áudio
-        self.play_btn.clicked.connect(lambda: print("Play Audio clicado"))
+        self.play_btn.clicked.connect(self.play_input_audio)
         buttons_layout.addWidget(self.play_btn)
 
         # Adicionar layout horizontal ao layout principal
@@ -264,14 +269,18 @@ class MainWindow(QMainWindow):
         self.process_btn.clicked.connect(self.process_audio)
         layout.addWidget(self.process_btn)
         
+        self.status_text = QTextEdit()
+        self.status_text.setReadOnly(True)
+        self.status_text.setPlaceholderText("Pronto para gravar")
+        self.status_text.setWordWrapMode(True)
 
-        self.status_label = QLabel("Pronto para gravar")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        # Tornar selecionável e copiável
-        self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        # Impedir expansão vertical desnecessária
-        #self.status_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        layout.addWidget(self.status_label)
+        # aparência de label
+        self.status_text.setFrameStyle(QFrame.NoFrame)
+        self.status_text.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.status_text.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        layout.addWidget(self.status_text)
+
 
         self.progress = QProgressBar()
         self.progress.setVisible(False)
@@ -284,7 +293,7 @@ class MainWindow(QMainWindow):
     # -------------------------
     def start_recording(self):
         self.recorder.start()
-        self.status_label.setText("🎙️ Gravando...")
+        self.status_text.setText("🎙️ Gravando...")
         self.record_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
 
@@ -295,47 +304,78 @@ class MainWindow(QMainWindow):
 
         if audio is not None:
             self.audio_data = audio
-            self.status_label.setText("Áudio gravado")
+            self.audio_path = self.save_input_audio_mp3(audio)
+            self.status_text.setText("Áudio gravado")
             self.process_btn.setEnabled(True)
+            self.play_btn.setEnabled(True)
             self.discard_btn.setEnabled(True)
         else:
-            self.status_label.setText("Nenhum áudio capturado")
+            self.status_text.setText("Nenhum áudio capturado")
 
+    def save_input_audio_mp3(self, audio_data):
+        audio_int16 = np.clip(audio_data, -1.0, 1.0)
+        audio_int16 = (audio_int16 * 32767).astype(np.int16)
+
+        audio_segment = AudioSegment(
+            audio_int16.tobytes(),
+            frame_rate=self.recorder.samplerate,
+            sample_width=2,
+            channels=1
+        )
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        tmp.close()
+
+        audio_segment.export(tmp.name, format="mp3")
+        return tmp.name
+        
     # -------------------------
     # ACTIONS
     # -------------------------
     def discard_audio(self):
         self.audio_data = None
+        os.remove(self.audio_path)
+        self.audio_path = None
         self.process_btn.setEnabled(False)
         self.discard_btn.setEnabled(False)
-        self.status_label.setText("Áudio descartado")
+        self.status_text.setText("Áudio descartado")
+        
 
     def process_audio(self):
-        if self.audio_data is None:
+        if self.audio_data is None or self.audio_path is None:
             return
 
         self.process_btn.setEnabled(False)
         self.discard_btn.setEnabled(False)
 
         self.progress.setVisible(True)
-        self.progress.setValue(0)
+        self.progress_callback(0,"")
 
         self.worker = ProcessingThread(
             self.audio_data.copy(),
             self.recorder.samplerate
         )
-        self.worker.progress.connect(self.progress.setValue)
+        self.worker.progress.connect(self.progress_callback)
         self.worker.finished.connect(self.processing_done)
         self.worker.start()
 
-    def processing_done(self, path):
-        self.status_label.setText("MP3 salvo com sucesso")
+    def progress_callback(self, value, msg):
+        self.progress.setValue(value)
+        self.status_text.setText(msg)
+
+    def play_input_audio(self):
+        print("play_input_audio")
+    
+    def processing_done(self, data):
+        self.status_text.setText(data["response"])
+       
         self.progress.setVisible(False)
-        print("📁 Arquivo final:", path)
         
-        self.player = AudioPlayerThread(path, fator=1.5)
+        print("📁 Arquivo final:", data["response_audio_path"])
+        
+        self.player = AudioPlayerThread(data["response_audio_path"], fator=1.5)
         self.player.finished.connect(
-            lambda: self.status_label.setText("Resposta reproduzida")
+            lambda: self.statusBar().showMessage("Pronto", 3000)
         )
         self.player.start()
 
