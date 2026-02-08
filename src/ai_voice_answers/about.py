@@ -1,6 +1,6 @@
 # about.py
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 __package__ = "ai_voice_answers"
 __program_name__ = "ai-voice-answers"
 __author__ = "Fernando Pujaico Rivera" 

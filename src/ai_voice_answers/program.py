@@ -607,8 +607,7 @@ class TrayIcon(QSystemTrayIcon):
 # =========================
 # MAIN
 # =========================
-
-if __name__ == "__main__":
+def main():
     # Captura de sinal Ctrl+C no terminal
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     
@@ -639,4 +638,6 @@ if __name__ == "__main__":
 
     sys.exit(app.exec_())
 
+if __name__ == "__main__":
+    main()
 
