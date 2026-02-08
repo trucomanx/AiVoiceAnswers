@@ -43,9 +43,13 @@ classifiers = [
 ]
 license = "GPL-3.0-only WITH Classpath-Exception-2.0 OR BSD-3-Clause"
 license-files = ["LICENSE"]
-keywords = ["writing", "translate"]
+keywords = ["ai", "llm", "audio"]
 dependencies = [
     "PyQt5",
+    "numpy",
+    "sounddevice",
+    "pydub",
+    "gTTS",
     "deep-consultation"
 ]
 

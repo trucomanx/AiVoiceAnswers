@@ -1,24 +1,27 @@
 #!/usr/bin/python3
 
-# pip install pyqt5 sounddevice numpy pydub
+# pip install PyQt5 numpy sounddevice pydub gTTS deep-consultation
 # sudo apt install ffmpeg
 
 import os
 import sys
 import time
+import signal
+import shutil
 import tempfile
+import subprocess
 import numpy as np
 import sounddevice as sd
 
 from pydub import AudioSegment
 
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QFrame, QTextEdit, 
+    QApplication, QMainWindow, QWidget, QFrame, QTextEdit, QFileDialog, 
     QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
     QSystemTrayIcon, QMenu, QAction, QSizePolicy, QSpacerItem
 )
-from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui  import QIcon, QDesktopServices
+from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 
 import ai_voice_answers.about             as about
 import ai_voice_answers.modules.configure as configure 
@@ -41,14 +44,45 @@ CONFIG_PATH = os.path.join( os.path.expanduser("~"),
                             "config.json" )
 
 DEFAULT_CONTENT={   
-    "toolbar_configure": "Configure",
-    "toolbar_configure_tooltip": "Open the configure Json file of program GUI",
-    "toolbar_about": "About",
-    "toolbar_about_tooltip": "About the program",
-    "toolbar_coffee": "Coffee",
-    "toolbar_coffee_tooltip": "Buy me a coffee (TrucomanX)",
-    "window_width": 1024,
-    "window_height": 800
+    "menubar_show_recorder": "Show window recorder",
+    "menubar_hide_recorder": "Hide window recorder",
+    "menubar_configure": "✨ Configure",
+    "menubar_about": "🌟 About",
+    "menubar_coffee": "☕ Buy me a coffee",
+    "menubar_exit": "❌ Exit",
+    "windows_no_apikey": "No api_key in",
+    "windows_loaded_apikey": "Loaded api_key",
+    "windows_transcription": "Transcription",
+    "windows_response_obtained": "Response obtained",
+    "window_file_not_exist": "📁 File does not exist",
+    "window_paying_audio": "📁 Playing audio",
+    "window_success_saving": "Success saving audio",
+    "window_error_saving": "Error saving audio",
+    "window_done": "Done",
+    "window_save_as": "Save as",
+    "window_save_as_default": "resposta.mp3",
+    "window_discard_audio": "Discard audio",
+    "window_no_audio_record": "No audio captured",
+    "window_audio_record": "Audio captured",
+    "window_recording": "🎙️ Recording...",
+    "window_recording_ended": "⏹️ Recording ended...",
+    "window_button_record": "Record",
+    "window_button_record_tooltip": "Init audio record",
+    "window_button_stop": "Stop record",
+    "window_button_stop_tooltip": "Stop audio record",
+    "window_button_discard": "Discard recorded audio",
+    "window_button_discard_tooltip": "Discard recorded audio",
+    "window_button_play_recorded": "Play recorded audio",
+    "window_button_play_recorded_tooltip": "Play recorded audio",
+    "window_button_processing": "Processing",
+    "window_button_processing_tooltip": "Processing the recorded audio",
+    "window_button_ready": "Ready to record",
+    "window_button_save_as": "Save as",
+    "window_button_save_as_tooltip": "Save as the response audio",
+    "window_button_play_response": "Play response audio",
+    "window_button_play_response_tooltip": "Play response audio",
+    "window_width": 420, 
+    "window_height": 320
 }
 
 configure.verify_default_config(CONFIG_PATH,default_content=DEFAULT_CONTENT)
@@ -66,11 +100,12 @@ DEFAULT_GPT_CONTENT={
     "usage": "https://deepinfra.com/dash/usage",
     "base_url": "https://api.deepinfra.com/v1/openai",
     "model_llm": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-    "model_transcript": "mistralai/Voxtral-Mini-3B-2507"
+    "model_transcript": "mistralai/Voxtral-Mini-3B-2507",
+    "language": "pt",
+    "play_factor": 1.5
 }
 
 configure.verify_default_config(CONFIG_GPT_PATH,default_content=DEFAULT_GPT_CONTENT)
-
 
 
 # =========================
@@ -100,7 +135,7 @@ class AudioRecorder:
             callback=self._callback
         )
         self.stream.start()
-        print("🎙️ Gravando...")
+        print(CONFIG["window_recording"])
 
     def stop(self):
         if not self.recording:
@@ -109,7 +144,7 @@ class AudioRecorder:
         self.stream.stop()
         self.stream.close()
         self.stream = None
-        print("⏹️ Gravação finalizada")
+        print(CONFIG["window_recording_ended"])
 
         if not self.frames:
             return None
@@ -124,67 +159,46 @@ class ProcessingThread(QThread):
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(dict)
 
-    def __init__(self, audio_data, samplerate, parent=None):
+    def __init__(self, audio_path, parent=None):
         super().__init__(parent)
-        self.audio_data = audio_data
-        self.samplerate = samplerate
+        self.audio_path = audio_path
 
     def run(self):
         # progress
         self.progress.emit(0,"")
-
-        audio_int16 = np.clip(self.audio_data, -1.0, 1.0)
-        audio_int16 = (audio_int16 * 32767).astype(np.int16)
-        
-        # progress
-        self.progress.emit(10,"Audio loaded in memory")
-
-        audio_segment = AudioSegment(
-            audio_int16.tobytes(),
-            frame_rate=self.samplerate,
-            sample_width=2,
-            channels=1
-        )
-
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        tmp.close()
-
-        audio_segment.export(tmp.name, format="mp3")
         
         config_gpt = configure.load_config(CONFIG_GPT_PATH)
         
         if len(config_gpt["api_key"].strip()) == 0:
-            self.progress.emit(0,"No api_key in:"+CONFIG_GPT_PATH)
+            self.progress.emit(0,CONFIG["windows_no_apikey"]+": "+CONFIG_GPT_PATH)
+            self.finished.emit({})
             return        
 
-        # progress
-        self.progress.emit(30,"💾 MP3 saved")
-        print("💾 MP3 salvo em:", tmp.name)
+        self.progress.emit(5,CONFIG["windows_loaded_apikey"])
+        print("📝 "+CONFIG["windows_loaded_apikey"])
         
-        language = "pt"
-        fator    = 1.5
+        language = config_gpt["language"]
         
-        transcription = transcription_in_depth(config_gpt, tmp.name, language=language)
+        transcription = transcription_in_depth(config_gpt, self.audio_path, language=language)
         
         # progress
-        self.progress.emit(60,"transcription:\n"+transcription)
-        print("📝 transcription:", transcription)
+        self.progress.emit(45,CONFIG["windows_transcription"]+":\n"+transcription)
+        print("📝 "+CONFIG["windows_transcription"]+": " + transcription)
         
         res = consultation_in_depth(config_gpt, transcription)
         
         # progress
-        self.progress.emit(90,"response obtained")
-        print("📝 result:", res)
+        self.progress.emit(90,res)
+        print("📝 "+CONFIG["windows_response_obtained"]+": ", res)
         
         res_audio_path = text_to_audio_file(res,language)
         
         # progress
-        self.progress.emit(100,"")
+        self.progress.emit(100,res)
         
-        # play_audio_file(res_audio_path, fator)
         out = {
             "transcription" : transcription,
-            "transcription_audio_path" : tmp.name,
+            "transcription_audio_path" : self.audio_path,
             "response": res,
             "response_audio_path": res_audio_path
         }
@@ -218,12 +232,18 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Gravador de Áudio")
-        self.setGeometry(200, 200, 420, 320)
+        self.setWindowTitle(about.__program_name__)
+        self.setGeometry(200, 200, CONFIG["window_width"], CONFIG["window_height"])
+        
+        ## Icon
+        # Get base directory for icons
+        self.icon_path = resource_path('icons', 'logo.png')
+        self.setWindowIcon(QIcon(self.icon_path))         
 
         self.recorder = AudioRecorder()
         self.audio_data = None
         self.audio_path = None
+        self.audio_res_path = None
 
         self._build_ui()
 
@@ -236,11 +256,15 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout()
         
-        self.record_btn = QPushButton("▶️ Gravar")
+        self.record_btn = QPushButton(CONFIG["window_button_record"])
+        self.record_btn.setIcon(QIcon.fromTheme("media-record"))
+        self.record_btn.setToolTip(CONFIG["window_button_record_tooltip"])
         self.record_btn.clicked.connect(self.start_recording)
         layout.addWidget(self.record_btn)
 
-        self.stop_btn = QPushButton("⏹️ Finalizar gravação")
+        self.stop_btn = QPushButton(CONFIG["window_button_stop"])
+        self.stop_btn.setIcon(QIcon.fromTheme("media-playback-stop"))
+        self.stop_btn.setToolTip(CONFIG["window_button_stop_tooltip"])
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_recording)
         layout.addWidget(self.stop_btn)
@@ -248,12 +272,16 @@ class MainWindow(QMainWindow):
         # Layout horizontal para descartar + play
         buttons_layout = QHBoxLayout()
 
-        self.discard_btn = QPushButton("Descartar")
+        self.discard_btn = QPushButton(CONFIG["window_button_discard"])
+        self.discard_btn.setIcon(QIcon.fromTheme("user-trash"))
+        self.discard_btn.setToolTip(CONFIG["window_button_discard_tooltip"])
         self.discard_btn.setEnabled(False)
-        self.discard_btn.clicked.connect(self.discard_audio)
+        self.discard_btn.clicked.connect(self.discard_input_audio)
         buttons_layout.addWidget(self.discard_btn)
 
-        self.play_btn = QPushButton("▶️ Play Audio")
+        self.play_btn = QPushButton(CONFIG["window_button_play_recorded"])
+        self.play_btn.setIcon(QIcon.fromTheme("multimedia-player"))
+        self.play_btn.setToolTip(CONFIG["window_button_play_recorded_tooltip"])
         self.play_btn.setEnabled(False)  # Pode habilitar quando tiver áudio
         self.play_btn.clicked.connect(self.play_input_audio)
         buttons_layout.addWidget(self.play_btn)
@@ -264,22 +292,41 @@ class MainWindow(QMainWindow):
         # Criar espaçamento vertical de 20 pixels
         layout.addSpacerItem(QSpacerItem(0, 20, QSizePolicy.Minimum, QSizePolicy.Fixed))
 
-        self.process_btn = QPushButton("Processar")
+        self.process_btn = QPushButton(CONFIG["window_button_processing"])
+        self.process_btn.setIcon(QIcon.fromTheme("system-run"))
+        self.process_btn.setToolTip(CONFIG["window_button_processing_tooltip"])
         self.process_btn.setEnabled(False)
         self.process_btn.clicked.connect(self.process_audio)
         layout.addWidget(self.process_btn)
         
         self.status_text = QTextEdit()
         self.status_text.setReadOnly(True)
-        self.status_text.setPlaceholderText("Pronto para gravar")
+        self.status_text.setPlaceholderText(CONFIG["window_button_ready"])
         self.status_text.setWordWrapMode(True)
-
-        # aparência de label
         self.status_text.setFrameStyle(QFrame.NoFrame)
         self.status_text.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.status_text.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
         layout.addWidget(self.status_text)
+
+        # Layout horizontal para Save as + play
+        buttons_res_layout = QHBoxLayout()
+
+        self.save_as_btn = QPushButton(CONFIG["window_button_save_as"])
+        self.save_as_btn.setIcon(QIcon.fromTheme("document-save-as"))
+        self.save_as_btn.setToolTip(CONFIG["window_button_save_as_tooltip"])
+        self.save_as_btn.setEnabled(False)
+        self.save_as_btn.clicked.connect(self.save_as_res_audio)
+        buttons_res_layout.addWidget(self.save_as_btn)
+
+        self.play_res_btn = QPushButton(CONFIG["window_button_play_response"])
+        self.play_res_btn.setIcon(QIcon.fromTheme("multimedia-player"))
+        self.play_res_btn.setToolTip(CONFIG["window_button_play_response_tooltip"])
+        self.play_res_btn.setEnabled(False)  # Pode habilitar quando tiver áudio
+        self.play_res_btn.clicked.connect(self.play_res_audio)
+        buttons_res_layout.addWidget(self.play_res_btn)
+
+        # Adicionar layout horizontal ao layout principal
+        layout.addLayout(buttons_res_layout)
 
 
         self.progress = QProgressBar()
@@ -293,7 +340,7 @@ class MainWindow(QMainWindow):
     # -------------------------
     def start_recording(self):
         self.recorder.start()
-        self.status_text.setText("🎙️ Gravando...")
+        self.status_text.setText(CONFIG["window_recording"])
         self.record_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
 
@@ -305,12 +352,12 @@ class MainWindow(QMainWindow):
         if audio is not None:
             self.audio_data = audio
             self.audio_path = self.save_input_audio_mp3(audio)
-            self.status_text.setText("Áudio gravado")
+            self.status_text.setText(CONFIG["window_audio_record"])
             self.process_btn.setEnabled(True)
             self.play_btn.setEnabled(True)
             self.discard_btn.setEnabled(True)
         else:
-            self.status_text.setText("Nenhum áudio capturado")
+            self.status_text.setText(CONFIG["window_no_audio_record"])
 
     def save_input_audio_mp3(self, audio_data):
         audio_int16 = np.clip(audio_data, -1.0, 1.0)
@@ -332,29 +379,29 @@ class MainWindow(QMainWindow):
     # -------------------------
     # ACTIONS
     # -------------------------
-    def discard_audio(self):
+    def discard_input_audio(self):
         self.audio_data = None
-        os.remove(self.audio_path)
+        if self.audio_path and os.path.isfile(self.audio_path):
+            os.remove(self.audio_path)
         self.audio_path = None
         self.process_btn.setEnabled(False)
         self.discard_btn.setEnabled(False)
-        self.status_text.setText("Áudio descartado")
-        
-
+        self.play_btn.setEnabled(False)
+        self.status_text.setText(CONFIG["window_discard_audio"])
+    
     def process_audio(self):
         if self.audio_data is None or self.audio_path is None:
             return
 
         self.process_btn.setEnabled(False)
-        self.discard_btn.setEnabled(False)
 
         self.progress.setVisible(True)
         self.progress_callback(0,"")
+        
+        if self.audio_res_path and os.path.isfile(self.audio_res_path):
+            os.remove(self.audio_res_path)
 
-        self.worker = ProcessingThread(
-            self.audio_data.copy(),
-            self.recorder.samplerate
-        )
+        self.worker = ProcessingThread( self.audio_path )
         self.worker.progress.connect(self.progress_callback)
         self.worker.finished.connect(self.processing_done)
         self.worker.start()
@@ -364,21 +411,82 @@ class MainWindow(QMainWindow):
         self.status_text.setText(msg)
 
     def play_input_audio(self):
-        print("play_input_audio")
+        if os.path.isfile(self.audio_path):
+            print(CONFIG["window_paying_audio"]+": "+self.audio_path)
+            
+            if hasattr(self, "player") and self.player.isRunning():
+                return  # ou pare a anterior
+            
+            self.player = AudioPlayerThread(self.audio_path, fator=1.0)
+            self.player.finished.connect(
+                lambda: self.statusBar().showMessage(CONFIG["window_done"], 3000)
+            )
+            self.player.start()
+        else:
+            print(CONFIG["window_file_not_exist"]+": "+self.audio_path)
     
     def processing_done(self, data):
+        if not data or "response" not in data:
+            #self.status_text.setText("Erro no processamento")
+            self.progress.setVisible(False)
+            return
+        
         self.status_text.setText(data["response"])
-       
+        self.audio_res_path = data["response_audio_path"]
+
         self.progress.setVisible(False)
         
-        print("📁 Arquivo final:", data["response_audio_path"])
+        self.play_res_audio()
         
-        self.player = AudioPlayerThread(data["response_audio_path"], fator=1.5)
-        self.player.finished.connect(
-            lambda: self.statusBar().showMessage("Pronto", 3000)
-        )
-        self.player.start()
+        self.save_as_btn.setEnabled(True)
+        self.play_res_btn.setEnabled(True)
+            
+    def save_as_res_audio(self):
+        if not self.audio_res_path or not os.path.isfile(self.audio_res_path):
+            return
 
+        # Nome sugerido
+        default_name = CONFIG["window_save_as_default"]
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            CONFIG["window_save_as"],
+            default_name,
+            "Audio Files (*.mp3)"
+        )
+
+        if not file_path:
+            return  # usuário cancelou
+
+        # garantir extensão
+        if not file_path.lower().endswith(".mp3"):
+            file_path += ".mp3"
+
+        try:
+            shutil.copyfile(self.audio_res_path, file_path)
+            self.statusBar().showMessage(CONFIG["window_success_saving"], 4000)
+        except Exception as e:
+            self.statusBar().showMessage(CONFIG["window_error_saving"]+f": {e}", 6000)
+        
+    def play_res_audio(self):
+        if os.path.isfile(self.audio_res_path):
+            print(CONFIG["window_paying_audio"]+": "+self.audio_res_path)
+            
+            if hasattr(self, "player") and self.player.isRunning():
+                return  # ou pare a anterior
+            
+            config_gpt = configure.load_config(CONFIG_GPT_PATH)
+            
+            self.player = AudioPlayerThread(self.audio_res_path, fator=config_gpt["play_factor"])
+            self.player.finished.connect(
+                lambda: self.statusBar().showMessage(CONFIG["window_done"], 3000)
+            )
+            self.player.start()
+        else:
+            msg = CONFIG["window_file_not_exist"]+": "+self.audio_res_path
+            self.statusBar().showMessage(msg, 3000)
+            print(msg)
+            
     def closeEvent(self, event):
         event.ignore()
         self.hide()
@@ -391,31 +499,93 @@ class TrayIcon(QSystemTrayIcon):
     def __init__(self, window, app):
         super().__init__()
 
+        ## Icon
+        # Get base directory for icons
+        self.icon_path = resource_path('icons', 'logo.png')
+
         self.window = window
         self.app = app
 
-        self.setIcon(QIcon.fromTheme("audio-input-microphone"))
-        self.setToolTip("Gravador de Áudio")
+        self.setIcon(QIcon(self.icon_path))
 
         menu = QMenu()
 
-        show_action = QAction("Abrir gravador", self)
+        #
+        show_action = QAction(  QIcon.fromTheme("view-fullscreen"), 
+                                CONFIG["menubar_show_recorder"], 
+                                self)
         show_action.triggered.connect(self.show_window)
-
-        hide_action = QAction("Ocultar janela", self)
-        hide_action.triggered.connect(self.hide_window)
-
-        quit_action = QAction("Sair", self)
-        quit_action.triggered.connect(self.quit_app)
-
         menu.addAction(show_action)
+
+        #
+        hide_action = QAction(  QIcon.fromTheme("view-restore"), 
+                                CONFIG["menubar_hide_recorder"], 
+                                self)
+        hide_action.triggered.connect(self.hide_window)
         menu.addAction(hide_action)
+
+        #
         menu.addSeparator()
+
+        #
+        self.configure_action = QAction(QIcon.fromTheme("document-properties"), 
+                                        CONFIG["menubar_configure"], 
+                                        self)
+        self.configure_action.triggered.connect(self.open_configure_editor)
+        menu.addAction(self.configure_action)
+        
+        #
+        self.about_action = QAction(QIcon.fromTheme("help-about"), 
+                                    CONFIG["menubar_about"], 
+                                    self)
+        self.about_action.triggered.connect(self.open_about)
+        menu.addAction(self.about_action)
+        
+        # Coffee
+        self.coffee_action = QAction(   QIcon.fromTheme("emblem-favorite"), 
+                                        CONFIG["menubar_coffee"], 
+                                        self)
+        self.coffee_action.triggered.connect(self.on_coffee_action_click)
+        menu.addAction(self.coffee_action)
+        
+        #
+        menu.addSeparator()
+        
+        #
+        quit_action = QAction(CONFIG["menubar_exit"], self)
+        quit_action.triggered.connect(self.quit_app)
         menu.addAction(quit_action)
 
         self.setContextMenu(menu)
 
         self.activated.connect(self.on_click)
+
+    def _open_file_in_text_editor(self, filepath):
+        if os.name == 'nt':  # Windows
+            os.startfile(filepath)
+        elif os.name == 'posix':  # Linux/macOS
+            subprocess.run(['xdg-open', filepath])
+
+    def open_configure_editor(self):
+        self._open_file_in_text_editor(CONFIG_PATH)
+
+    def open_about(self):
+        data={
+            "version": about.__version__,
+            "package": about.__package__,
+            "program_name": about.__program_name__,
+            "author": about.__author__,
+            "email": about.__email__,
+            "description": about.__description__,
+            "url_source": about.__url_source__,
+            "url_doc": about.__url_doc__,
+            "url_funding": about.__url_funding__,
+            "url_bugs": about.__url_bugs__
+        }
+        show_about_window(data,self.icon_path)
+
+    def on_coffee_action_click(self):
+        QDesktopServices.openUrl(QUrl("https://ko-fi.com/trucomanx"))
 
     def show_window(self):
         self.window.show()
@@ -439,7 +609,26 @@ class TrayIcon(QSystemTrayIcon):
 # =========================
 
 if __name__ == "__main__":
+    # Captura de sinal Ctrl+C no terminal
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    
+    create_desktop_directory()    
+    create_desktop_menu()
+    create_desktop_file(os.path.join("~",".local","share","applications"))
+    
+    for n in range(len(sys.argv)):
+        if sys.argv[n] == "--autostart":
+            create_desktop_directory(overwrite = True)
+            create_desktop_menu(overwrite = True)
+            create_desktop_file(os.path.join("~",".config","autostart"), overwrite=True)
+            return
+        if sys.argv[n] == "--applications":
+            create_desktop_directory(overwrite = True)
+            create_desktop_menu(overwrite = True)
+            create_desktop_file(os.path.join("~",".local","share","applications"), overwrite=True)
+    
     app = QApplication(sys.argv)
+    app.setApplicationName(about.__package__) # xprop WM_CLASS # *.desktop -> StartupWMClass  
     app.setQuitOnLastWindowClosed(False)
 
     window = MainWindow()

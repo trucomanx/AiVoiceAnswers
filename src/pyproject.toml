@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai_voice_answers"
+version = "0.1.0"
+description = "A click-to-talk interface that turns voice questions into spoken AI answers."
+readme = "README.md"
+authors = [{name = "Fernando Pujaico Rivera", email = "fernando.pujaico.rivera@gmail.com"}]
+maintainers = [{name = "Fernando Pujaico Rivera", email = "fernando.pujaico.rivera@gmail.com"}]
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "GPL-3.0-only WITH Classpath-Exception-2.0 OR BSD-3-Clause"
+license-files = ["LICENSE"]
+keywords = ["ai", "llm", "audio"]
+dependencies = [
+    "PyQt5",
+    "numpy",
+    "sounddevice",
+    "pydub",
+    "gTTS",
+    "deep-consultation"
+]
+
+[project.urls]
+"Bug Reports" = "https://github.com/trucomanx/AiVoiceAnswers/issues"
+"Funding" = "https://trucomanx.github.io/en/funding.html"
+"Documentation" = "https://github.com/trucomanx/AiVoiceAnswers/tree/main/doc"
+"Source" = "https://github.com/trucomanx/AiVoiceAnswers"
+
+[project.scripts]
+"ai-voice-answers" = "ai_voice_answers.program:main"
+
+[tool.setuptools]
+packages = ["ai_voice_answers", "ai_voice_answers.modules"]
+
+[tool.setuptools.package-data]
+"ai_voice_answers" = ["icons/logo.png"]

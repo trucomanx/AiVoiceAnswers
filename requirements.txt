@@ -1,2 +1,6 @@
 PyQt5
+numpy
+sounddevice
+pydub
+gTTS
 deep-consultation

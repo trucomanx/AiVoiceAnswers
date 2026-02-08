@@ -13,7 +13,10 @@ def play_audio_file(audio_path, fator):
         audio = AudioSegment.from_file(audio_path)
         
         # Ajustar a velocidade sem alterar o pitch
-        audio_modificado = audio.speedup(playback_speed=fator)
+        if fator != 1.0:
+            audio_modificado = audio.speedup(playback_speed=fator)
+        else:
+            audio_modificado = audio
         
         # Exportar o áudio para um buffer em memória
         audio_buffer = io.BytesIO()
