@@ -46,7 +46,8 @@ CONFIG_PATH = os.path.join( os.path.expanduser("~"),
 DEFAULT_CONTENT={   
     "menubar_show_recorder": "Show window recorder",
     "menubar_hide_recorder": "Hide window recorder",
-    "menubar_configure": "✨ Configure",
+    "menubar_configure": "✨ Configure window",
+    "menubar_configure_gpt": "✨ Configure LLM",
     "menubar_about": "🌟 About",
     "menubar_coffee": "☕ Buy me a coffee",
     "menubar_exit": "❌ Exit",
@@ -171,6 +172,7 @@ class ProcessingThread(QThread):
         
         if len(config_gpt["api_key"].strip()) == 0:
             self.progress.emit(0,CONFIG["windows_no_apikey"]+": "+CONFIG_GPT_PATH)
+            self._open_file_in_text_editor(CONFIG_GPT_PATH)
             self.finished.emit({})
             return        
 
@@ -535,6 +537,13 @@ class TrayIcon(QSystemTrayIcon):
         menu.addAction(self.configure_action)
         
         #
+        self.configure_gpt_action = QAction(QIcon.fromTheme("document-properties"), 
+                                            CONFIG["menubar_configure_gpt"], 
+                                            self)
+        self.configure_gpt_action.triggered.connect(self.open_configure_gpt_editor)
+        menu.addAction(self.configure_gpt_action)
+        
+        #
         self.about_action = QAction(QIcon.fromTheme("help-about"), 
                                     CONFIG["menubar_about"], 
                                     self)
@@ -568,7 +577,10 @@ class TrayIcon(QSystemTrayIcon):
 
     def open_configure_editor(self):
         self._open_file_in_text_editor(CONFIG_PATH)
-
+        
+    def open_configure_gpt_editor(self):
+        self._open_file_in_text_editor(CONFIG_GPT_PATH)
+    
     def open_about(self):
         data={
             "version": about.__version__,
