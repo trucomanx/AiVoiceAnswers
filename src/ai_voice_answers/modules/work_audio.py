@@ -30,9 +30,13 @@ def play_audio_file(audio_path, fator):
 
 
 
-def text_to_audio_file(text,language):
+def text_to_audio_file(text, language, dir_path):
     tts = gTTS(text=text, lang=language)
-    tmp_filename = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tmp_filename = tempfile.NamedTemporaryFile(
+        suffix=".mp3",
+        delete=False,
+        dir=dir_path
+    )
     tts.save(tmp_filename.name)
     return tmp_filename.name;
 

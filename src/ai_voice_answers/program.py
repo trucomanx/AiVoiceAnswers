@@ -6,6 +6,7 @@
 import os
 import sys
 import time
+import atexit
 import signal
 import shutil
 import tempfile
@@ -111,6 +112,15 @@ DEFAULT_GPT_CONTENT={
 
 configure.verify_default_config(CONFIG_GPT_PATH,default_content=DEFAULT_GPT_CONTENT)
 
+################################################################################
+
+def open_file_in_text_editor(filepath):
+    if os.name == 'nt':  # Windows
+        os.startfile(filepath)
+    elif system == "Darwin":  # macOS
+        subprocess.run(["open", filepath])
+    elif os.name == 'posix':  # Linux/macOS
+        subprocess.run(['xdg-open', filepath])
 
 # =========================
 # AUDIO RECORDER
@@ -163,9 +173,10 @@ class ProcessingThread(QThread):
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(dict)
 
-    def __init__(self, audio_path, parent=None):
+    def __init__(self, audio_path, dir_temp, parent=None):
         super().__init__(parent)
         self.audio_path = audio_path
+        self.dir_temp = dir_temp
 
     def run(self):
         # progress
@@ -175,8 +186,7 @@ class ProcessingThread(QThread):
         
         if len(config_gpt["api_key"].strip()) == 0:
             self.progress.emit(0,CONFIG["windows_no_apikey"]+": "+CONFIG_GPT_PATH)
-            self._open_file_in_text_editor(CONFIG_GPT_PATH)
-            self.finished.emit({})
+            self.finished.emit({"error": "no_api_key"})
             return        
 
         self.progress.emit(5,CONFIG["windows_loaded_apikey"])
@@ -200,7 +210,7 @@ class ProcessingThread(QThread):
         self.progress.emit(90,res)
         print("📝 "+CONFIG["windows_response_obtained"]+": ", res)
         
-        res_audio_path = text_to_audio_file(res,language)
+        res_audio_path = text_to_audio_file(res,language, self.dir_temp)
         
         # progress
         self.progress.emit(100,res)
@@ -241,6 +251,9 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self.temp_dir = tempfile.mkdtemp(prefix=about.__package__+"_")
+        atexit.register(self.cleanup_temp_dir)
+        
         self.setWindowTitle(about.__program_name__)
         self.setGeometry(200, 200, CONFIG["window_width"], CONFIG["window_height"])
         
@@ -256,6 +269,10 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
 
+    def cleanup_temp_dir(self):
+        if os.path.isdir(self.temp_dir):
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
     # -------------------------
     # UI
     # -------------------------
@@ -398,7 +415,11 @@ class MainWindow(QMainWindow):
             channels=1
         )
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=".mp3",
+            delete=False,
+            dir=self.temp_dir
+        )
         tmp.close()
 
         audio_segment.export(tmp.name, format="mp3")
@@ -429,7 +450,7 @@ class MainWindow(QMainWindow):
         if self.audio_res_path and os.path.isfile(self.audio_res_path):
             os.remove(self.audio_res_path)
 
-        self.worker = ProcessingThread( self.audio_path )
+        self.worker = ProcessingThread( self.audio_path, self.temp_dir )
         self.worker.progress.connect(self.progress_callback)
         self.worker.finished.connect(self.processing_done)
         self.worker.start()
@@ -454,8 +475,14 @@ class MainWindow(QMainWindow):
             print(CONFIG["window_file_not_exist"]+": "+self.audio_path)
     
     def processing_done(self, data):
-        if not data or "response" not in data:
+            
+        if not data:
             #self.status_text.setText("Erro no processamento")
+            self.progress.setVisible(False)
+            return
+
+        if "error" in data and data["error"] == "no_api_key":
+            open_file_in_text_editor(CONFIG_GPT_PATH)
             self.progress.setVisible(False)
             return
         
@@ -595,17 +622,11 @@ class TrayIcon(QSystemTrayIcon):
 
         self.activated.connect(self.on_click)
 
-    def _open_file_in_text_editor(self, filepath):
-        if os.name == 'nt':  # Windows
-            os.startfile(filepath)
-        elif os.name == 'posix':  # Linux/macOS
-            subprocess.run(['xdg-open', filepath])
-
     def open_configure_editor(self):
-        self._open_file_in_text_editor(CONFIG_PATH)
+        open_file_in_text_editor(CONFIG_PATH)
         
     def open_configure_gpt_editor(self):
-        self._open_file_in_text_editor(CONFIG_GPT_PATH)
+        open_file_in_text_editor(CONFIG_GPT_PATH)
     
     def open_about(self):
         data={
@@ -632,8 +653,20 @@ class TrayIcon(QSystemTrayIcon):
 
     def hide_window(self):
         self.window.hide()
-
+       
     def quit_app(self):
+    
+        # parar player se existir
+        if hasattr(self.window, "player") and self.window.player.isRunning():
+            self.window.player.quit()
+            self.window.player.wait()
+
+        # parar worker se existir
+        if hasattr(self.window, "worker") and self.window.worker.isRunning():
+            self.window.worker.quit()
+            self.window.worker.wait()
+    
+        self.window.cleanup_temp_dir()
         self.hide()
         self.app.quit()
 
