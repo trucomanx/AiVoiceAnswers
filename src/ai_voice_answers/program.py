@@ -117,7 +117,7 @@ configure.verify_default_config(CONFIG_GPT_PATH,default_content=DEFAULT_GPT_CONT
 def open_file_in_text_editor(filepath):
     if os.name == 'nt':  # Windows
         os.startfile(filepath)
-    elif system == "Darwin":  # macOS
+    elif sys.platform == 'darwin':  # macOS
         subprocess.run(["open", filepath])
     elif os.name == 'posix':  # Linux/macOS
         subprocess.run(['xdg-open', filepath])

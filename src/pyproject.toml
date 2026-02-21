@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai_voice_answers"
-version = "0.1.4"
+version = "0.1.5"
 description = "A click-to-talk interface that turns voice questions into spoken AI answers."
 readme = "README.md"
 authors = [{name = "Fernando Pujaico Rivera", email = "fernando.pujaico.rivera@gmail.com"}]
