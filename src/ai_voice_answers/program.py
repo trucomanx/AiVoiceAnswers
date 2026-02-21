@@ -32,8 +32,9 @@ from ai_voice_answers.desktop import create_desktop_file
 from ai_voice_answers.desktop import create_desktop_directory
 from ai_voice_answers.desktop import create_desktop_menu
 
-from ai_voice_answers.modules.consult    import transcription_in_depth
+from deep_consultation.chat_deepinfra    import ChatDeepInfra
 from ai_voice_answers.modules.consult    import consultation_in_depth
+from ai_voice_answers.modules.consult    import transcription_in_depth
 from ai_voice_answers.modules.work_audio import text_to_audio_file
 from ai_voice_answers.modules.work_audio import play_audio_file
 
@@ -187,7 +188,11 @@ class ProcessingThread(QThread):
         self.progress.emit(45,CONFIG["windows_transcription"]+":\n"+transcription)
         print("📝 "+CONFIG["windows_transcription"]+": " + transcription)
         
-        res = consultation_in_depth(config_gpt, transcription)
+        cdi = ChatDeepInfra(config_gpt["base_url"], 
+                            config_gpt["api_key"], 
+                            config_gpt["model_llm"])
+        
+        res = consultation_in_depth(cdi, transcription)
         
         # progress
         self.progress.emit(90,res)
