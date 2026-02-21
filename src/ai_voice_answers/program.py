@@ -100,7 +100,7 @@ DEFAULT_GPT_CONTENT={
     "api_key": "",
     "usage": "https://deepinfra.com/dash/usage",
     "base_url": "https://api.deepinfra.com/v1/openai",
-    "model_llm": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+    "model_llm": "deepseek-ai/DeepSeek-V3.2",
     "model_transcript": "mistralai/Voxtral-Mini-3B-2507",
     "language": "pt",
     "play_factor": 1.5
