@@ -19,7 +19,7 @@ from pydub import AudioSegment
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QTextEdit, QFileDialog, 
     QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
-    QSystemTrayIcon, QMenu, QAction, QSizePolicy, QSpacerItem
+    QSystemTrayIcon, QMenu, QAction, QSizePolicy, QSpacerItem, QCheckBox
 )
 from PyQt5.QtGui  import QIcon, QDesktopServices
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
@@ -34,7 +34,6 @@ from ai_voice_answers.desktop import create_desktop_directory
 from ai_voice_answers.desktop import create_desktop_menu
 
 from deep_consultation.chat_deepinfra    import ChatDeepInfra
-from ai_voice_answers.modules.consult    import consultation_in_depth
 from ai_voice_answers.modules.consult    import transcription_in_depth
 from ai_voice_answers.modules.work_audio import text_to_audio_file
 from ai_voice_answers.modules.work_audio import play_audio_file
@@ -69,6 +68,8 @@ DEFAULT_CONTENT={
     "window_audio_record": "Audio captured",
     "window_recording": "🎙️ Recording...",
     "window_recording_ended": "⏹️ Recording ended...",
+    "window_use_history": "Use history",
+    "window_use_history_tooltip": "Use history i chat list",
     "window_button_record": "Record",
     "window_button_record_tooltip": "Init audio record",
     "window_button_stop": "Stop record",
@@ -173,10 +174,11 @@ class ProcessingThread(QThread):
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(dict)
 
-    def __init__(self, audio_path, dir_temp, parent=None):
+    def __init__(self, audio_path, dir_temp, use_history=True, parent=None):
         super().__init__(parent)
         self.audio_path = audio_path
         self.dir_temp = dir_temp
+        self.use_history = use_history
 
     def run(self):
         # progress
@@ -204,7 +206,22 @@ class ProcessingThread(QThread):
                             config_gpt["api_key"], 
                             config_gpt["model_llm"])
         
-        res = consultation_in_depth(cdi, transcription)
+        # Sempre define o system prompt antes de perguntar
+        SYSTEM_PROMPT = """
+        You are an expert in many fields, a true guru. 
+        Your mission is to respond to any question asked by the user. 
+        If you do not know the answer, you must be honest and clearly state that you do not have it. 
+        Your response should be a short, concise paragraph.
+        Avoid trivial conversations, redundant answers, and idle chatter.
+        Your personality is stoic and spartan.
+        """
+        cdi.set_system_prompt(SYSTEM_PROMPT)
+        
+        # Checa se histórico deve ser usado
+        if self.use_history:
+            res = cdi.chat(transcription)
+        else:
+            res = cdi.ask_once(transcription)
         
         # progress
         self.progress.emit(90,res)
@@ -281,6 +298,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         layout = QVBoxLayout()
+        
+        # Checkbox para ativar ou desativar histórico/memory
+        self.use_history_checkbox = QCheckBox(CONFIG["window_use_history"])
+        self.use_history_checkbox.setToolTip(CONFIG["window_button_record_tooltip"])
+        self.use_history_checkbox.setChecked(True)  # default ON
+        layout.addWidget(self.use_history_checkbox)
         
         self.record_btn = QPushButton(CONFIG["window_button_record"])
         self.record_btn.setIcon(QIcon.fromTheme("media-record"))
@@ -450,7 +473,12 @@ class MainWindow(QMainWindow):
         if self.audio_res_path and os.path.isfile(self.audio_res_path):
             os.remove(self.audio_res_path)
 
-        self.worker = ProcessingThread( self.audio_path, self.temp_dir )
+        self.worker = ProcessingThread(
+            self.audio_path,
+            self.temp_dir,
+            use_history=self.use_history_checkbox.isChecked()
+        )
+        
         self.worker.progress.connect(self.progress_callback)
         self.worker.finished.connect(self.processing_done)
         self.worker.start()
