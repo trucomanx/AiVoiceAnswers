@@ -1,6 +1,6 @@
 
-from deep_consultation.core       import consult_with_deepchat
-from deep_consultation.core_audio import speech_file_transcript_deepinfra
+from deep_consultation.chat_deepinfra import ChatDeepInfra
+from deep_consultation.core_audio     import speech_file_transcript_deepinfra
 
     
 SYSTEM_PROMPT = """
@@ -13,11 +13,14 @@ Avoid trivial conversations, redundant answers, and idle chatter.
 
 def consultation_in_depth(system_data, msg):
 
-    OUT=consult_with_deepchat(  system_data["base_url"],
-                                system_data["api_key"],
-                                system_data["model_llm"],
-                                msg,
-                                SYSTEM_PROMPT)
+    cdi = ChatDeepInfra(system_data["base_url"], 
+                        system_data["api_key"], 
+                        system_data["model_llm"])
+    
+    cdi.set_system_prompt(SYSTEM_PROMPT)
+    
+    OUT=cdi.ask_once(msg)
+    
     return OUT
 
 def transcription_in_depth(system_data, filepath, language=None):
