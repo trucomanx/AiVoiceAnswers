@@ -72,6 +72,8 @@ DEFAULT_CONTENT={
     "window_button_record_tooltip": "Init audio record",
     "window_button_stop": "Stop record",
     "window_button_stop_tooltip": "Stop audio record",
+    "window_button_stop_proc": "Stop record+processing",
+    "window_button_stop_proc_tooltip": "Stop audio recording and start processing",
     "window_button_discard": "Discard recorded audio",
     "window_button_discard_tooltip": "Discard recorded audio",
     "window_button_play_recorded": "Play recorded audio",
@@ -83,8 +85,8 @@ DEFAULT_CONTENT={
     "window_button_save_as_tooltip": "Save as the response audio",
     "window_button_play_response": "Play response audio",
     "window_button_play_response_tooltip": "Play response audio",
-    "window_width": 420, 
-    "window_height": 320
+    "window_width": 600, 
+    "window_height": 400
 }
 
 configure.verify_default_config(CONFIG_PATH,default_content=DEFAULT_CONTENT)
@@ -269,12 +271,25 @@ class MainWindow(QMainWindow):
         self.record_btn.clicked.connect(self.start_recording)
         layout.addWidget(self.record_btn)
 
+        # Layout horizontal para stop
+        buttons_stop_layout = QHBoxLayout()
+        
         self.stop_btn = QPushButton(CONFIG["window_button_stop"])
         self.stop_btn.setIcon(QIcon.fromTheme("media-playback-stop"))
         self.stop_btn.setToolTip(CONFIG["window_button_stop_tooltip"])
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_recording)
-        layout.addWidget(self.stop_btn)
+        buttons_stop_layout.addWidget(self.stop_btn)
+        
+        self.stop_proc_btn = QPushButton(CONFIG["window_button_stop_proc"])
+        self.stop_proc_btn.setIcon(QIcon.fromTheme("media-playback-stop"))
+        self.stop_proc_btn.setToolTip(CONFIG["window_button_stop_proc_tooltip"])
+        self.stop_proc_btn.setEnabled(False)
+        self.stop_proc_btn.clicked.connect(self.stop_recording_and_proc)
+        buttons_stop_layout.addWidget(self.stop_proc_btn)
+        
+        # Adicionar layout horizontal ao layout principal
+        layout.addLayout(buttons_stop_layout)
         
         # Layout horizontal para descartar + play
         buttons_layout = QHBoxLayout()
@@ -350,10 +365,12 @@ class MainWindow(QMainWindow):
         self.status_text.setText(CONFIG["window_recording"])
         self.record_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
+        self.stop_proc_btn.setEnabled(True)
 
     def stop_recording(self):
         audio = self.recorder.stop()
         self.stop_btn.setEnabled(False)
+        self.stop_proc_btn.setEnabled(False)
         self.record_btn.setEnabled(True)
 
         if audio is not None:
@@ -365,6 +382,10 @@ class MainWindow(QMainWindow):
             self.discard_btn.setEnabled(True)
         else:
             self.status_text.setText(CONFIG["window_no_audio_record"])
+
+    def stop_recording_and_proc(self):
+        self.stop_recording()
+        self.process_audio()
 
     def save_input_audio_mp3(self, audio_data):
         audio_int16 = np.clip(audio_data, -1.0, 1.0)
