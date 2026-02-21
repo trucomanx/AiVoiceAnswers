@@ -174,11 +174,13 @@ class ProcessingThread(QThread):
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(dict)
 
-    def __init__(self, audio_path, dir_temp, use_history=True, parent=None):
+    def __init__(self, audio_path, dir_temp, use_history=True, cdi=None, parent=None):
         super().__init__(parent)
         self.audio_path = audio_path
         self.dir_temp = dir_temp
         self.use_history = use_history
+        # Se não veio um cdi, cria novo
+        self.cdi = cdi
 
     def run(self):
         # progress
@@ -202,9 +204,10 @@ class ProcessingThread(QThread):
         self.progress.emit(45,CONFIG["windows_transcription"]+":\n"+transcription)
         print("📝 "+CONFIG["windows_transcription"]+": " + transcription)
         
-        cdi = ChatDeepInfra(config_gpt["base_url"], 
-                            config_gpt["api_key"], 
-                            config_gpt["model_llm"])
+        if self.cdi is None:
+            self.cdi = ChatDeepInfra(   config_gpt["base_url"], 
+                                        config_gpt["api_key"], 
+                                        config_gpt["model_llm"])
         
         # Sempre define o system prompt antes de perguntar
         SYSTEM_PROMPT = """
@@ -215,13 +218,13 @@ class ProcessingThread(QThread):
         Avoid trivial conversations, redundant answers, and idle chatter.
         Your personality is stoic and spartan.
         """
-        cdi.set_system_prompt(SYSTEM_PROMPT)
+        self.cdi.set_system_prompt(SYSTEM_PROMPT)
         
         # Checa se histórico deve ser usado
         if self.use_history:
-            res = cdi.chat(transcription)
+            res = self.cdi.chat(transcription)
         else:
-            res = cdi.ask_once(transcription)
+            res = self.cdi.ask_once(transcription)
         
         # progress
         self.progress.emit(90,res)
@@ -267,6 +270,8 @@ class AudioPlayerThread(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        self.cdi = None
 
         self.temp_dir = tempfile.mkdtemp(prefix=about.__package__+"_")
         atexit.register(self.cleanup_temp_dir)
@@ -476,7 +481,8 @@ class MainWindow(QMainWindow):
         self.worker = ProcessingThread(
             self.audio_path,
             self.temp_dir,
-            use_history=self.use_history_checkbox.isChecked()
+            use_history = self.use_history_checkbox.isChecked(),
+            cdi = self.cdi
         )
         
         self.worker.progress.connect(self.progress_callback)
@@ -513,6 +519,10 @@ class MainWindow(QMainWindow):
             open_file_in_text_editor(CONFIG_GPT_PATH)
             self.progress.setVisible(False)
             return
+        
+        # Atualiza o cdi do MainWindow para manter histórico
+        if hasattr(self.worker, "cdi") and self.worker.cdi is not None:
+            self.cdi = self.worker.cdi
         
         self.status_text.setText(data["response"])
         self.audio_res_path = data["response_audio_path"]
