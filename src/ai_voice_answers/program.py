@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem
 )
 from PyQt5.QtGui  import QIcon, QDesktopServices, QColor
-from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal, QSize
 
 import ai_voice_answers.about             as about
 import ai_voice_answers.modules.configure as configure 
@@ -128,6 +128,38 @@ def open_file_in_text_editor(filepath):
     elif os.name == 'posix':  # Linux/macOS
         subprocess.run(['xdg-open', filepath])
 
+################################################################################
+
+class ResizableListWidget(QListWidget):
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_item_sizes()
+
+    def update_item_sizes(self):
+        for i in range(self.count()):
+            item = self.item(i)
+            widget = self.itemWidget(item)
+            if widget:
+                # atualiza largura do widget para forçar recalculo do boundingRect
+                widget.setFixedWidth(self.viewport().width())
+                item.setSizeHint(widget.sizeHint())
+
+class WordWrapLabel(QLabel):
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+        self.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.setMargin(5)
+        self._list_item = None
+
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+
+    def sizeHint(self):
+        w = self.width() if self.width() > 0 else 100
+        fm = self.fontMetrics()
+        rect = fm.boundingRect(0, 0, w, 10000, Qt.TextWordWrap, self.text())
+        return QSize(rect.width(), rect.height() + 10)
+                    
 # =========================
 # AUDIO RECORDER
 # =========================
@@ -204,6 +236,7 @@ class ProcessingThread(QThread):
         language = config_gpt["language"]
         
         transcription = transcription_in_depth(config_gpt, self.audio_path, language=language)
+        transcription = transcription.strip()
         
         # progress
         self.progress.emit(45,CONFIG["windows_transcription"]+":\n"+transcription)
@@ -224,9 +257,9 @@ class ProcessingThread(QThread):
         
         # Checa se histórico deve ser usado
         if self.use_history:
-            res = self.cdi.chat(transcription)
+            res = self.cdi.chat(transcription).strip()
         else:
-            res = self.cdi.ask_once(transcription)
+            res = self.cdi.ask_once(transcription).strip()
         
         # progress
         self.progress.emit(90,res)
@@ -238,9 +271,9 @@ class ProcessingThread(QThread):
         self.progress.emit(100,res)
         
         out = {
-            "transcription" : transcription,
+            "transcription" : transcription.strip(),
             "transcription_audio_path" : self.audio_path,
-            "response": res,
+            "response": res.strip(),
             "response_audio_path": res_audio_path
         }
         self.finished.emit(out)
@@ -319,27 +352,23 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.record_btn)
 
         # Layout horizontal para stop
-        buttons_stop_layout = QHBoxLayout()
-        
-        self.stop_btn = QPushButton(CONFIG["window_button_stop"])
-        self.stop_btn.setIcon(QIcon.fromTheme("media-playback-stop"))
-        self.stop_btn.setToolTip(CONFIG["window_button_stop_tooltip"])
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self.stop_recording)
-        buttons_stop_layout.addWidget(self.stop_btn)
-        
         self.stop_proc_btn = QPushButton(CONFIG["window_button_stop_proc"])
         self.stop_proc_btn.setIcon(QIcon.fromTheme("media-playback-stop"))
         self.stop_proc_btn.setToolTip(CONFIG["window_button_stop_proc_tooltip"])
         self.stop_proc_btn.setEnabled(False)
         self.stop_proc_btn.clicked.connect(self.stop_recording_and_proc)
-        buttons_stop_layout.addWidget(self.stop_proc_btn)
+        layout.addWidget(self.stop_proc_btn)
         
-        # Adicionar layout horizontal ao layout principal
-        layout.addLayout(buttons_stop_layout)
         
         # Layout horizontal para descartar + play
         buttons_layout = QHBoxLayout()
+
+        self.stop_btn = QPushButton(CONFIG["window_button_stop"])
+        self.stop_btn.setIcon(QIcon.fromTheme("media-playback-stop"))
+        self.stop_btn.setToolTip(CONFIG["window_button_stop_tooltip"])
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self.stop_recording)
+        buttons_layout.addWidget(self.stop_btn)
 
         self.discard_btn = QPushButton(CONFIG["window_button_discard"])
         self.discard_btn.setIcon(QIcon.fromTheme("user-trash"))
@@ -381,7 +410,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.status_text)
 
         # 
-        self.history_list = QListWidget()
+        self.history_list = ResizableListWidget()
         self.history_list.setSelectionMode(QListWidget.SingleSelection)
         self.history_list.setToolTip(CONFIG["window_history_view_tooltip"])
         self.history_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -549,6 +578,7 @@ class MainWindow(QMainWindow):
             self.cdi = self.worker.cdi
         
         # Atualiza visualmente o histórico
+        '''
         self.history_list.clear()
         for msg in self.cdi.get_history():
             item = QListWidgetItem(msg["content"])
@@ -557,6 +587,27 @@ class MainWindow(QMainWindow):
             else:
                 item.setBackground(QColor("#f8d7da"))  # vermelho claro
             self.history_list.addItem(item)
+        '''
+        for msg in self.cdi.get_history():
+            label = WordWrapLabel(msg["content"])
+            
+            # cor de fundo
+            if msg["role"] == "user":
+                label.setStyleSheet("background-color: #d1e7dd;")
+            else:
+                label.setStyleSheet("background-color: #f8d7da;")
+            
+            item = QListWidgetItem()
+            item.setSizeHint(label.sizeHint())
+            
+            # linka o label ao item para o resizeEvent funcionar
+            label._list_item = item
+            
+            self.history_list.addItem(item)
+            self.history_list.setItemWidget(item, label)
+            # Depois de adicionar todos, força atualização:
+            self.history_list.update_item_sizes()
+        
         
         # Scroll automático para o final
         self.history_list.scrollToBottom()
