@@ -83,11 +83,13 @@ DEFAULT_CONTENT={
     "window_button_play_recorded_tooltip": "Play recorded audio",
     "window_button_processing": "Processing",
     "window_button_processing_tooltip": "Processing the recorded audio",
-    "window_button_ready": "Ready to record",
     "window_button_save_as": "Save as audio",
     "window_button_save_as_tooltip": "Save as the response audio",
     "window_button_play_response": "Play response audio",
     "window_button_play_response_tooltip": "Play response audio",
+    "window_status_text": "Ready to record",
+    "window_status_text_tooltip": "Text of last response",
+    "window_history_view_tooltip": "Current history",
     "window_width": 600, 
     "window_height": 600
 }
@@ -366,7 +368,8 @@ class MainWindow(QMainWindow):
         
         self.status_text = QTextEdit()
         self.status_text.setReadOnly(True)
-        self.status_text.setPlaceholderText(CONFIG["window_button_ready"])
+        self.status_text.setPlaceholderText(CONFIG["window_status_text"])
+        self.status_text.setToolTip(CONFIG["window_status_text_tooltip"])
         self.status_text.setWordWrapMode(True)
         self.status_text.setFrameStyle(QFrame.NoFrame)
         self.status_text.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -378,6 +381,7 @@ class MainWindow(QMainWindow):
         # 
         self.history_list = QListWidget()
         self.history_list.setSelectionMode(QListWidget.SingleSelection)
+        self.history_list.setToolTip(CONFIG["window_history_view_tooltip"])
         self.history_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.history_list)
 
