@@ -19,9 +19,10 @@ from pydub import AudioSegment
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QTextEdit, QFileDialog, 
     QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
-    QSystemTrayIcon, QMenu, QAction, QSizePolicy, QSpacerItem, QCheckBox
+    QSystemTrayIcon, QMenu, QAction, QSizePolicy, QSpacerItem, QCheckBox,
+    QListWidget, QListWidgetItem
 )
-from PyQt5.QtGui  import QIcon, QDesktopServices
+from PyQt5.QtGui  import QIcon, QDesktopServices, QColor
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 
 import ai_voice_answers.about             as about
@@ -83,12 +84,12 @@ DEFAULT_CONTENT={
     "window_button_processing": "Processing",
     "window_button_processing_tooltip": "Processing the recorded audio",
     "window_button_ready": "Ready to record",
-    "window_button_save_as": "Save as",
+    "window_button_save_as": "Save as audio",
     "window_button_save_as_tooltip": "Save as the response audio",
     "window_button_play_response": "Play response audio",
     "window_button_play_response_tooltip": "Play response audio",
     "window_width": 600, 
-    "window_height": 400
+    "window_height": 600
 }
 
 configure.verify_default_config(CONFIG_PATH,default_content=DEFAULT_CONTENT)
@@ -210,14 +211,11 @@ class ProcessingThread(QThread):
                                         config_gpt["model_llm"])
         
         # Sempre define o system prompt antes de perguntar
-        SYSTEM_PROMPT = """
-        You are an expert in many fields, a true guru. 
-        Your mission is to respond to any question asked by the user. 
-        If you do not know the answer, you must be honest and clearly state that you do not have it. 
-        Your response should be a short, concise paragraph.
-        Avoid trivial conversations, redundant answers, and idle chatter.
-        Your personality is stoic and spartan.
-        """
+        SYSTEM_PROMPT = (
+            "You are an expert in many fields. Answer concisely. "
+            "If unsure, admit it. Avoid trivial, redundant, or idle chatter. "
+            "You have no memory but can accept history. Your personality is stoic and spartan."
+        )
         self.cdi.set_system_prompt(SYSTEM_PROMPT)
         
         # Checa se histórico deve ser usado
@@ -307,7 +305,7 @@ class MainWindow(QMainWindow):
         # Checkbox para ativar ou desativar histórico/memory
         self.use_history_checkbox = QCheckBox(CONFIG["window_use_history"])
         self.use_history_checkbox.setToolTip(CONFIG["window_button_record_tooltip"])
-        self.use_history_checkbox.setChecked(True)  # default ON
+        self.use_history_checkbox.setChecked(False)  # default OFF
         layout.addWidget(self.use_history_checkbox)
         
         self.record_btn = QPushButton(CONFIG["window_button_record"])
@@ -373,7 +371,15 @@ class MainWindow(QMainWindow):
         self.status_text.setFrameStyle(QFrame.NoFrame)
         self.status_text.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.status_text.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.status_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.status_text.setFixedHeight(80)  # ou outro valor que faça sentido
         layout.addWidget(self.status_text)
+
+        # 
+        self.history_list = QListWidget()
+        self.history_list.setSelectionMode(QListWidget.SingleSelection)
+        self.history_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(self.history_list)
 
         # Layout horizontal para Save as + play
         buttons_res_layout = QHBoxLayout()
@@ -523,6 +529,19 @@ class MainWindow(QMainWindow):
         # Atualiza o cdi do MainWindow para manter histórico
         if hasattr(self.worker, "cdi") and self.worker.cdi is not None:
             self.cdi = self.worker.cdi
+        
+        # Atualiza visualmente o histórico
+        self.history_list.clear()
+        for msg in self.cdi.get_history():
+            item = QListWidgetItem(msg["content"])
+            if msg["role"] == "user":
+                item.setBackground(QColor("#d1e7dd"))  # verde claro
+            else:
+                item.setBackground(QColor("#f8d7da"))  # vermelho claro
+            self.history_list.addItem(item)
+        
+        # Scroll automático para o final
+        self.history_list.scrollToBottom()
         
         self.status_text.setText(data["response"])
         self.audio_res_path = data["response_audio_path"]
