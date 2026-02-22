@@ -87,6 +87,8 @@ DEFAULT_CONTENT={
     "window_button_save_as_tooltip": "Save as the response audio",
     "window_button_play_response": "Play response audio",
     "window_button_play_response_tooltip": "Play response audio",
+    "window_button_clear_history": "Clear History",
+    "window_button_clear_history_tooltip": "Clear the chat history and start fresh",
     "window_status_text": "Ready to record",
     "window_status_text_tooltip": "Text of last response",
     "window_history_view_tooltip": "Current history",
@@ -402,6 +404,12 @@ class MainWindow(QMainWindow):
         self.play_res_btn.clicked.connect(self.play_res_audio)
         buttons_res_layout.addWidget(self.play_res_btn)
 
+        self.clear_history_btn = QPushButton(CONFIG["window_button_clear_history"])
+        self.clear_history_btn.setIcon(QIcon.fromTheme("edit-clear"))
+        self.clear_history_btn.setToolTip(CONFIG["window_button_clear_history_tooltip"])
+        self.clear_history_btn.clicked.connect(self.clear_history_action)
+        buttons_res_layout.addWidget(self.clear_history_btn)
+
         # Adicionar layout horizontal ao layout principal
         layout.addLayout(buttons_res_layout)
 
@@ -412,6 +420,12 @@ class MainWindow(QMainWindow):
 
         central.setLayout(layout)
 
+    def clear_history_action(self):
+        if self.cdi:
+            self.cdi.clear_history()
+        self.history_list.clear()
+        self.status_text.setText(CONFIG["window_status_text"])
+    
     # -------------------------
     # RECORD CONTROL
     # -------------------------
